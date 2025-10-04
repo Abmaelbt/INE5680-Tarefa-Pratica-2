@@ -2,6 +2,10 @@ import os
 import json
 import base64
 import crypto_utils
+from flask import Flask, request, jsonify, abort
+
+# inicializa o servidor web flask
+app = Flask(__name__)
 
 # simulacao de um banco de dados de usuarios e arquivos usando arquivos json
 DB_USERS_FILE = "server_db_users.json"
@@ -24,13 +28,24 @@ def save_db(data, file_path):
     with open(file_path, 'w') as f:
         json.dump(data, f, indent=4)
 
-def register_user(username, pbkdf2_token):
-    # registra um novo usuario no servidor
+# --- endpoints da api ---
+
+@app.route('/register', methods=['POST'])
+def route_register():
+    data = request.json
+    username = data.get('username')
+    pbkdf2_token_b64 = data.get('pbkdf2_token_b64')
+    
+    print(f"[LOG] recebida solicitacao de registro para o usuario: {username}")
+
+    if not username or not pbkdf2_token_b64:
+        abort(400, description="usuario ou token nao fornecidos.")
+
     db_users = load_db(DB_USERS_FILE)
     if username in db_users:
-        return None, "usuario ja existe."
+        return jsonify({"success": False, "message": "usuario ja existe."}), 409
 
-    # gera o salt do scrypt, o segredo totp e deriva o token final
+    pbkdf2_token = base64.b64decode(pbkdf2_token_b64)
     scrypt_salt = crypto_utils.generate_salt()
     scrypt_token_final = crypto_utils.derive_scrypt_token(pbkdf2_token, scrypt_salt)
     totp_secret = crypto_utils.generate_totp_secret()
@@ -41,46 +56,97 @@ def register_user(username, pbkdf2_token):
         "totp_secret": totp_secret
     }
     save_db(db_users, DB_USERS_FILE)
-    return totp_secret, "usuario registrado com sucesso."
+    
+    print(f"[LOG] usuario {username} registrado com sucesso.")
+    return jsonify({
+        "success": True, 
+        "message": "usuario registrado com sucesso.",
+        "totp_secret": totp_secret
+    })
 
-def authenticate_step1(username, pbkdf2_token):
-    # primeira etapa da autenticacao: verifica o token derivado de login/senha
+@app.route('/auth/step1', methods=['POST'])
+def route_auth_step1():
+    data = request.json
+    username = data.get('username')
+    pbkdf2_token_b64 = data.get('pbkdf2_token_b64')
+    print(f"[LOG] recebida tentativa de login (etapa 1) para: {username}")
+
     db_users = load_db(DB_USERS_FILE)
     user_data = db_users.get(username)
     if not user_data:
-        return False
+        return jsonify({"authenticated": False}), 401
 
     scrypt_salt = base64.b64decode(user_data["scrypt_salt_b64"])
     stored_scrypt_token = base64.b64decode(user_data["scrypt_token_b64"])
     
-    # deriva o token recebido com o salt armazenado
+    pbkdf2_token = base64.b64decode(pbkdf2_token_b64)
     scrypt_token_to_check = crypto_utils.derive_scrypt_token(pbkdf2_token, scrypt_salt)
 
-    return scrypt_token_to_check == stored_scrypt_token
+    authenticated = scrypt_token_to_check == stored_scrypt_token
+    if authenticated:
+        print(f"[LOG] usuario {username} passou na etapa 1.")
+    else:
+        print(f"[LOG] falha na etapa 1 para {username}.")
+        
+    return jsonify({"authenticated": authenticated})
 
-def authenticate_step2(username, totp_code):
-    # segunda etapa da autenticacao: verifica o codigo totp
+@app.route('/auth/step2', methods=['POST'])
+def route_auth_step2():
+    data = request.json
+    username = data.get('username')
+    totp_code = data.get('totp_code')
+    print(f"[LOG] recebida tentativa de login (etapa 2) para: {username}")
+
     db_users = load_db(DB_USERS_FILE)
     user_data = db_users.get(username)
     if not user_data:
-        return False
-    
-    return crypto_utils.verify_totp_code(user_data["totp_secret"], totp_code)
+        return jsonify({"authenticated": False}), 401
 
-def store_file(username, filename, encrypted_content):
-    # armazena um arquivo cifrado para um usuario
+    authenticated = crypto_utils.verify_totp_code(user_data["totp_secret"], totp_code)
+    if authenticated:
+        print(f"[LOG] usuario {username} autenticado com sucesso (2fa).")
+    else:
+        print(f"[LOG] falha na etapa 2 (2fa) para {username}.")
+        
+    return jsonify({"authenticated": authenticated})
+
+@app.route('/files/upload', methods=['POST'])
+def route_upload_file():
+    data = request.json
+    username = data.get('username')
+    filename = data.get('filename')
+    encrypted_content = data.get('encrypted_content')
+    print(f"[LOG] recebida solicitacao de upload do arquivo '{filename}' para o usuario '{username}'")
+    
     db_files = load_db(DB_FILES_FILE)
     if username not in db_files:
         db_files[username] = {}
     
     db_files[username][filename] = encrypted_content
     save_db(db_files, DB_FILES_FILE)
-    print("arquivo armazenado no servidor.")
+    
+    print(f"[LOG] arquivo '{filename}' armazenado com sucesso.")
+    return jsonify({"success": True, "message": "arquivo armazenado no servidor."})
 
-def retrieve_file(username, filename):
-    # recupera um arquivo cifrado
+@app.route('/files/download', methods=['POST'])
+def route_download_file():
+    data = request.json
+    username = data.get('username')
+    filename = data.get('filename')
+    print(f"[LOG] recebida solicitacao de download do arquivo '{filename}' para '{username}'")
+
     db_files = load_db(DB_FILES_FILE)
-    return db_files.get(username, {}).get(filename)
+    encrypted_content = db_files.get(username, {}).get(filename)
 
-# inicializa o 'banco de dados' ao iniciar o servidor
-init_db()
+    if not encrypted_content:
+        return jsonify({"success": False, "message": "arquivo nao encontrado."}), 404
+        
+    print(f"[LOG] enviando arquivo '{filename}' para o cliente.")
+    return jsonify({"success": True, "encrypted_content": encrypted_content})
+
+
+if __name__ == '__main__':
+    init_db()
+    print("servidor iniciado em http://127.0.0.1:5000")
+    app.run(host='127.0.0.1', port=5000, debug=False)
+
