@@ -2,8 +2,15 @@ import os
 import getpass
 import json
 import base64
+import requests
 import crypto_utils
-import server
+import logging
+
+# configuracao de logs para o cliente
+logging.basicConfig(level=logging.INFO, format='[CLIENT LOG] %(message)s')
+
+# endereco base do servidor
+SERVER_URL = "http://127.0.0.1:5000"
 
 # pasta para armazenar o salt do cliente
 CLIENT_DATA_DIR = "client_data"
@@ -11,6 +18,14 @@ CLIENT_DATA_DIR = "client_data"
 def ensure_client_dir():
     if not os.path.exists(CLIENT_DATA_DIR):
         os.makedirs(CLIENT_DATA_DIR)
+
+def check_server_status():
+    """verifica se o servidor esta online antes de tentar uma operacao."""
+    try:
+        response = requests.get(f"{SERVER_URL}/status", timeout=3)
+        return response.status_code == 200
+    except requests.exceptions.RequestException:
+        return False
 
 def get_client_salt_path(username):
     return os.path.join(CLIENT_DATA_DIR, f"{username}_salt.json")
@@ -30,56 +45,86 @@ def load_client_salt(username):
         return base64.b64decode(data["pbkdf2_salt_b64"])
 
 def handle_register():
-    # fluxo de registro de um novo usuario
+    if not check_server_status():
+        logging.error("\nnao foi possivel conectar ao servidor. verifique se o 'server.py' esta em execucao.")
+        return
+
     username = input("escolha um nome de usuario: ")
     password = getpass.getpass("escolha uma senha: ")
     
     if os.path.exists(get_client_salt_path(username)):
-        print("erro: usuario ja registrado neste cliente.")
+        logging.error("usuario ja registrado neste cliente.")
         return
 
-    # o cliente gera e armazena seu proprio salt para derivar o token de autenticacao e a chave de cifra
     client_salt = crypto_utils.generate_salt()
     pbkdf2_token = crypto_utils.derive_pbkdf2_token(password, client_salt)
     
-    totp_secret, message = server.register_user(username, pbkdf2_token)
+    payload = {
+        "username": username,
+        "pbkdf2_token_b64": base64.b64encode(pbkdf2_token).decode('utf-8')
+    }
     
-    if totp_secret:
-        print(f"sucesso: {message}")
-        save_client_salt(username, client_salt)
-        uri = crypto_utils.get_totp_uri(username, totp_secret)
-        crypto_utils.display_qr_code(uri)
-        print("\nimportante: escaneie o qr code com google authenticator ou similar.")
-    else:
-        print(f"falha no registro: {message}")
+    try:
+        logging.info(f"enviando solicitacao de registro para '{username}' ao servidor...")
+        response = requests.post(f"{SERVER_URL}/register", json=payload)
+        response_data = response.json()
+
+        if response.status_code == 200 and response_data.get("success"):
+            logging.info(f"sucesso: {response_data['message']}")
+            save_client_salt(username, client_salt)
+            totp_secret = response_data['totp_secret']
+            uri = crypto_utils.get_totp_uri(username, totp_secret)
+            crypto_utils.display_qr_code(uri)
+            print("\nimportante: escaneie o qr code com google authenticator ou similar.")
+        else:
+            logging.error(f"falha no registro: {response_data.get('message', 'erro desconhecido')}")
+    except requests.exceptions.RequestException:
+        logging.error("a comunicacao com o servidor falhou durante o registro.")
 
 def handle_login():
-    # fluxo de login e autenticacao de dois fatores
+    if not check_server_status():
+        logging.error("\nnao foi possivel conectar ao servidor. verifique se o 'server.py' esta em execucao.")
+        return
+        
     username = input("usuario: ")
     password = getpass.getpass("senha: ")
 
     client_salt = load_client_salt(username)
     if not client_salt:
-        print("falha na autenticacao: usuario nao encontrado neste cliente.")
+        logging.error("falha na autenticacao: usuario nao encontrado neste cliente.")
         return
 
     # etapa 1: autenticacao com senha
+    logging.info("derivando token e enviando para autenticacao (etapa 1)...")
     pbkdf2_token = crypto_utils.derive_pbkdf2_token(password, client_salt)
-    if not server.authenticate_step1(username, pbkdf2_token):
-        print("falha na autenticacao: usuario ou senha invalidos.")
-        return
+    payload_step1 = {
+        "username": username,
+        "pbkdf2_token_b64": base64.b64encode(pbkdf2_token).decode('utf-8')
+    }
+    
+    try:
+        response_step1 = requests.post(f"{SERVER_URL}/auth/step1", json=payload_step1)
+        if not response_step1.json().get("authenticated"):
+            logging.error("falha na autenticacao: usuario ou senha invalidos.")
+            return
 
-    # etapa 2: autenticacao com totp
-    totp_code = input("codigo de autenticacao (6 digitos): ")
-    if not server.authenticate_step2(username, totp_code):
-        print("falha na autenticacao: codigo invalido.")
-        return
+        # etapa 2: autenticacao com totp
+        logging.info("senha verificada. por favor, insira o codigo 2fa.")
+        totp_code = input("codigo de autenticacao (6 digitos): ")
+        payload_step2 = {"username": username, "totp_code": totp_code}
+        
+        response_step2 = requests.post(f"{SERVER_URL}/auth/step2", json=payload_step2)
+        if not response_step2.json().get("authenticated"):
+            logging.error("falha na autenticacao: codigo invalido.")
+            return
 
-    print("\nlogin bem-sucedido!")
-    logged_in_menu(username, password, client_salt)
+        logging.info("login bem-sucedido!")
+        logged_in_menu(username, password, client_salt)
+
+    except requests.exceptions.RequestException:
+        logging.error("a comunicacao com o servidor falhou durante o login.")
 
 def logged_in_menu(username, password, client_salt):
-    # menu de acoes para um usuario autenticado
     while True:
         print("\n--- menu principal ---")
         print("1. enviar arquivo")
@@ -92,7 +137,7 @@ def logged_in_menu(username, password, client_salt):
         elif choice == '2':
             handle_download(username, password, client_salt)
         elif choice == '3':
-            print("logout realizado.")
+            logging.info("logout realizado.")
             break
         else:
             print("opcao invalida.")
@@ -100,42 +145,88 @@ def logged_in_menu(username, password, client_salt):
 def handle_upload(username, password, client_salt):
     filepath = input("caminho do arquivo para enviar: ")
     if not os.path.exists(filepath):
-        print("erro: arquivo nao encontrado.")
+        logging.error("arquivo nao encontrado.")
         return
 
     filename = os.path.basename(filepath)
     with open(filepath, 'rb') as f:
         file_data = f.read()
 
-    # deriva a chave de cifra a partir da senha e do salt do cliente
+    logging.info("derivando chave e cifrando o arquivo...")
     encryption_key = crypto_utils.derive_pbkdf2_token(password, client_salt)
     encrypted_content = crypto_utils.encrypt_aes_gcm(file_data, encryption_key)
     
-    server.store_file(username, filename, encrypted_content)
-    print(f"arquivo '{filename}' enviado com sucesso.")
+    payload = {
+        "username": username,
+        "filename": filename,
+        "encrypted_content": encrypted_content # ja e um dicionario com strings base64
+    }
+    
+    try:
+        logging.info(f"enviando arquivo '{filename}' para o servidor...")
+        response = requests.post(f"{SERVER_URL}/files/upload", json=payload)
+        if response.json().get("success"):
+            logging.info(f"arquivo '{filename}' enviado com sucesso.")
+        else:
+            logging.error("falha ao enviar o arquivo.")
+    except requests.exceptions.RequestException:
+        logging.error("a comunicacao com o servidor falhou durante o envio do arquivo.")
 
 def handle_download(username, password, client_salt):
-    filename = input("nome do arquivo para baixar: ")
-    
-    encrypted_content = server.retrieve_file(username, filename)
-    if not encrypted_content:
-        print("erro: arquivo nao encontrado no servidor.")
-        return
+    try:
+        # primeiro, lista os arquivos disponiveis
+        logging.info("solicitando lista de arquivos do servidor...")
+        list_payload = {"username": username}
+        response_list = requests.post(f"{SERVER_URL}/files/list", json=list_payload)
+        response_list_data = response_list.json()
 
-    # deriva a mesma chave de cifra para decifrar o arquivo
-    decryption_key = crypto_utils.derive_pbkdf2_token(password, client_salt)
-    decrypted_data = crypto_utils.decrypt_aes_gcm(encrypted_content, decryption_key)
+        if not response_list_data.get("success"):
+            logging.error("nao foi possivel obter a lista de arquivos.")
+            return
 
-    if decrypted_data:
-        print("\n--- conteudo do arquivo decifrado ---")
-        try:
-            # tenta decodificar como texto, se falhar, mostra os bytes
-            print(decrypted_data.decode('utf-8'))
-        except UnicodeDecodeError:
-            print(f"(dados binarios): {decrypted_data}")
-        print("------------------------------------")
-    else:
-        print("falha ao decifrar o arquivo. a senha pode estar incorreta ou o arquivo corrompido.")
+        files = response_list_data.get("files", [])
+        if not files:
+            logging.info("nenhum arquivo disponivel para download.")
+            return
+        
+        print("\n--- arquivos disponiveis ---")
+        for f in files:
+            print(f"- {f}")
+        print("--------------------------")
+
+        # agora, pede ao usuario para escolher um arquivo
+        filename = input("nome do arquivo para baixar: ")
+        if filename not in files:
+            logging.error("nome de arquivo invalido.")
+            return
+        
+        # prossegue com o download
+        download_payload = {"username": username, "filename": filename}
+        logging.info(f"solicitando o arquivo '{filename}' do servidor...")
+        response = requests.post(f"{SERVER_URL}/files/download", json=download_payload)
+        response_data = response.json()
+
+        if not response_data.get("success"):
+            logging.error(f"arquivo nao encontrado no servidor: {response_data.get('message')}")
+            return
+        
+        encrypted_content = response_data.get('encrypted_content')
+        logging.info("arquivo recebido. derivando chave e decifrando...")
+        decryption_key = crypto_utils.derive_pbkdf2_token(password, client_salt)
+        decrypted_data = crypto_utils.decrypt_aes_gcm(encrypted_content, decryption_key)
+
+        if decrypted_data:
+            print("\n--- conteudo do arquivo decifrado ---")
+            try:
+                print(decrypted_data.decode('utf-8'))
+            except UnicodeDecodeError:
+                print(f"(dados binarios): {decrypted_data}")
+            print("------------------------------------")
+        else:
+            logging.error("falha ao decifrar o arquivo. a senha pode estar incorreta ou o arquivo corrompido.")
+            
+    except requests.exceptions.RequestException:
+        logging.error("a comunicacao com o servidor falhou durante o download.")
 
 def main():
     ensure_client_dir()
