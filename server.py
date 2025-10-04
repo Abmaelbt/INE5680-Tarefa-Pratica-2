@@ -4,6 +4,7 @@ import base64
 import crypto_utils
 from flask import Flask, request, jsonify, abort
 
+# inicializa o servidor web flask
 app = Flask(__name__)
 
 # simulacao de um banco de dados de usuarios e arquivos usando arquivos json
@@ -29,7 +30,11 @@ def save_db(data, file_path):
 
 # --- endpoints da api ---
 
-# cadastro de usuario
+@app.route('/status', methods=['GET'])
+def route_status():
+    # endpoint simples para o cliente verificar se o servidor esta online
+    return jsonify({"status": "online"})
+
 @app.route('/register', methods=['POST'])
 def route_register():
     data = request.json
@@ -127,6 +132,18 @@ def route_upload_file():
     
     print(f"[LOG] arquivo '{filename}' armazenado com sucesso.")
     return jsonify({"success": True, "message": "arquivo armazenado no servidor."})
+
+@app.route('/files/list', methods=['POST'])
+def route_list_files():
+    data = request.json
+    username = data.get('username')
+    print(f"[LOG] recebida solicitacao de listagem de arquivos para '{username}'")
+
+    db_files = load_db(DB_FILES_FILE)
+    user_files = db_files.get(username, {})
+    filenames = list(user_files.keys())
+    
+    return jsonify({"success": True, "files": filenames})
 
 @app.route('/files/download', methods=['POST'])
 def route_download_file():

@@ -19,6 +19,14 @@ def ensure_client_dir():
     if not os.path.exists(CLIENT_DATA_DIR):
         os.makedirs(CLIENT_DATA_DIR)
 
+def check_server_status():
+    """verifica se o servidor esta online antes de tentar uma operacao."""
+    try:
+        response = requests.get(f"{SERVER_URL}/status", timeout=3)
+        return response.status_code == 200
+    except requests.exceptions.RequestException:
+        return False
+
 def get_client_salt_path(username):
     return os.path.join(CLIENT_DATA_DIR, f"{username}_salt.json")
 
@@ -37,6 +45,10 @@ def load_client_salt(username):
         return base64.b64decode(data["pbkdf2_salt_b64"])
 
 def handle_register():
+    if not check_server_status():
+        logging.error("\nnao foi possivel conectar ao servidor. verifique se o 'server.py' esta em execucao.")
+        return
+
     username = input("escolha um nome de usuario: ")
     password = getpass.getpass("escolha uma senha: ")
     
@@ -66,10 +78,14 @@ def handle_register():
             print("\nimportante: escaneie o qr code com google authenticator ou similar.")
         else:
             logging.error(f"falha no registro: {response_data.get('message', 'erro desconhecido')}")
-    except requests.exceptions.RequestException as e:
-        logging.error(f"erro de comunicacao com o servidor: {e}")
+    except requests.exceptions.RequestException:
+        logging.error("a comunicacao com o servidor falhou durante o registro.")
 
 def handle_login():
+    if not check_server_status():
+        logging.error("\nnao foi possivel conectar ao servidor. verifique se o 'server.py' esta em execucao.")
+        return
+        
     username = input("usuario: ")
     password = getpass.getpass("senha: ")
 
@@ -105,8 +121,8 @@ def handle_login():
         logging.info("login bem-sucedido!")
         logged_in_menu(username, password, client_salt)
 
-    except requests.exceptions.RequestException as e:
-        logging.error(f"erro de comunicacao com o servidor: {e}")
+    except requests.exceptions.RequestException:
+        logging.error("a comunicacao com o servidor falhou durante o login.")
 
 def logged_in_menu(username, password, client_salt):
     while True:
@@ -153,8 +169,8 @@ def handle_upload(username, password, client_salt):
             logging.info(f"arquivo '{filename}' enviado com sucesso.")
         else:
             logging.error("falha ao enviar o arquivo.")
-    except requests.exceptions.RequestException as e:
-        logging.error(f"erro de comunicacao com o servidor: {e}")
+    except requests.exceptions.RequestException:
+        logging.error("a comunicacao com o servidor falhou durante o envio do arquivo.")
 
 def handle_download(username, password, client_salt):
     try:
@@ -209,8 +225,8 @@ def handle_download(username, password, client_salt):
         else:
             logging.error("falha ao decifrar o arquivo. a senha pode estar incorreta ou o arquivo corrompido.")
             
-    except requests.exceptions.RequestException as e:
-        logging.error(f"erro de comunicacao com o servidor: {e}")
+    except requests.exceptions.RequestException:
+        logging.error("a comunicacao com o servidor falhou durante o download.")
 
 def main():
     ensure_client_dir()
