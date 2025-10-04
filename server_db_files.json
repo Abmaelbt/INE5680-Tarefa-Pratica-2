@@ -1,1 +1,14 @@
-{}
+{
+    "ab": {
+        "teste.txt": {
+            "nonce": "Pq9wzdowyJ2PdCzo",
+            "ciphertext": "49kzwY3DuD/SBBwDLXCxuE0KtH+gVs8I+YCld3MJ/oFxZdlaHTRAkZFaNXhzcBJUgm4H"
+        }
+    },
+    "batista": {
+        "teste.txt": {
+            "nonce": "DodaP9VCz5gSQQM5",
+            "ciphertext": "LJh7kJB4qkVM1GaZeo+LtlGRfZMDg+c+Kbr1PROxD5vh1ezb+cMEoHXNCzWWatEF1wpr"
+        }
+    }
+}

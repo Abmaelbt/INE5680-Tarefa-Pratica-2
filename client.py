@@ -157,13 +157,37 @@ def handle_upload(username, password, client_salt):
         logging.error(f"erro de comunicacao com o servidor: {e}")
 
 def handle_download(username, password, client_salt):
-    filename = input("nome do arquivo para baixar: ")
-    
-    payload = {"username": username, "filename": filename}
-    
     try:
+        # primeiro, lista os arquivos disponiveis
+        logging.info("solicitando lista de arquivos do servidor...")
+        list_payload = {"username": username}
+        response_list = requests.post(f"{SERVER_URL}/files/list", json=list_payload)
+        response_list_data = response_list.json()
+
+        if not response_list_data.get("success"):
+            logging.error("nao foi possivel obter a lista de arquivos.")
+            return
+
+        files = response_list_data.get("files", [])
+        if not files:
+            logging.info("nenhum arquivo disponivel para download.")
+            return
+        
+        print("\n--- arquivos disponiveis ---")
+        for f in files:
+            print(f"- {f}")
+        print("--------------------------")
+
+        # agora, pede ao usuario para escolher um arquivo
+        filename = input("nome do arquivo para baixar: ")
+        if filename not in files:
+            logging.error("nome de arquivo invalido.")
+            return
+        
+        # prossegue com o download
+        download_payload = {"username": username, "filename": filename}
         logging.info(f"solicitando o arquivo '{filename}' do servidor...")
-        response = requests.post(f"{SERVER_URL}/files/download", json=payload)
+        response = requests.post(f"{SERVER_URL}/files/download", json=download_payload)
         response_data = response.json()
 
         if not response_data.get("success"):
@@ -208,4 +232,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -1,7 +1,12 @@
 {
     "ab": {
-        "scrypt_salt_b64": "GWnM/n7biBcaKYih/9W5nw==",
-        "scrypt_token_b64": "UHAijs58CJs4vj2PMiKhi0slPX5FIv7yhuYDHLhKwNQ=",
-        "totp_secret": "BMFASX4DVSLZZU4ES5KDQ2NZZGIA5GK3"
+        "scrypt_salt_b64": "q87NmgleoW/MVOsiavmhBQ==",
+        "scrypt_token_b64": "mOhFhr9gHk9v2zwdYTjlhIn1GhVKqyZav6Kxgkk4f2g=",
+        "totp_secret": "GBPO7HQ24SNELVBQRCGVELGXJKKL6N77"
+    },
+    "batista": {
+        "scrypt_salt_b64": "2++ePGE1CiDBo4WKMFRpAg==",
+        "scrypt_token_b64": "d6r9vLfmqHKks/Y6EKJLuWL9WjQihE4nalUFH1Cu1fo=",
+        "totp_secret": "F5ECODHS6ONIUUYGXL6LLSJWGDO36SIW"
     }
 }

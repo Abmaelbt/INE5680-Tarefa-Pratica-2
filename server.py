@@ -4,7 +4,6 @@ import base64
 import crypto_utils
 from flask import Flask, request, jsonify, abort
 
-# inicializa o servidor web flask
 app = Flask(__name__)
 
 # simulacao de um banco de dados de usuarios e arquivos usando arquivos json
@@ -30,6 +29,7 @@ def save_db(data, file_path):
 
 # --- endpoints da api ---
 
+# cadastro de usuario
 @app.route('/register', methods=['POST'])
 def route_register():
     data = request.json
@@ -149,4 +149,3 @@ if __name__ == '__main__':
     init_db()
     print("servidor iniciado em http://127.0.0.1:5000")
     app.run(host='127.0.0.1', port=5000, debug=False)
-
