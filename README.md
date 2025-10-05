@@ -1,6 +1,8 @@
 # **Servidor de Nuvem Segura com Criptografia e 2FA**
 
 Este projeto é uma implementação em Python de um sistema cliente-servidor que simula um serviço de armazenamento em nuvem seguro, baseado na especificação da tarefa prática de INE5680.  
+### Alunos:
+Abmael Batista da Silva (22203744) e Jader Theisges (22215141)
 
 ## **Tecnologias Utilizadas**
 

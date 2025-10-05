@@ -20,3 +20,6 @@ instance
 *.bak
 *.tmp
 *.old
+teste.txt
+server_db_files.json
+server_db_users.json
